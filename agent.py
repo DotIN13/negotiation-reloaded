@@ -20,9 +20,9 @@ class Agent:
         battle_beta: Parameters to allocate spent resources across battlefields.
         issue_bottomlines: Minimum acceptable shares for proposals.
     """
-    NUM_ISSUE_FEATURES = 7
-    NUM_RESOURCE_FEATURES = 3  # [military_advantage, resources, total_surplus]
-    NUM_BATTLE_FEATURES = 7    # [overall_adv, area_adv, resources, total_surplus, ally_support, neutral_support]
+    NUM_ISSUE_FEATURES = 8
+    NUM_RESOURCE_FEATURES = 4
+    NUM_BATTLE_FEATURES = 8
 
     def __init__(
         self,
@@ -97,6 +97,7 @@ class Agent:
 
         # Build feature vector per action
         base_features = {
+            'conflict_intensity': world.conflict_intensity,
             'advantage': world.get_military_advantage(self),
             'resources': self.resources,
             'weight': self.issue_weights[issue.name],
@@ -110,6 +111,7 @@ class Agent:
         actions = ['propose', 'accept', 'reject', 'idle']
         for idx, action in enumerate(actions):
             feature_matrix[:, idx] = [
+                base_features['conflict_intensity'],
                 base_features['advantage'],
                 base_features['resources'],
                 base_features['weight'],
@@ -142,7 +144,12 @@ class Agent:
         """
         adv = world.get_military_advantage(self)
         resources = self.resources
-        x = self.resource_beta.dot(np.array([adv, resources, self.total_surplus]))
+        x = self.resource_beta.dot(np.array([
+            world.conflict_intensity,
+            adv,
+            resources,
+            self.total_surplus
+        ]))
         return self._sigmoid(x)
 
     def allocate_battle(
@@ -152,7 +159,8 @@ class Agent:
         """
         Allocate a portion of resources across battlefields.
         Returns:
-            Mapping battlefield_name -> resource_amount.
+            allocations: Mapping battlefield_name -> resource_amount
+            total_to_spend: Total resources to be allocated.
         """
         spend_frac = self.compute_spend_fraction(world)
         total_to_spend = spend_frac * self.resources
@@ -167,6 +175,7 @@ class Agent:
             area_adv = (cA - cB) if self.camp == 'A' else (cB - cA)
             area_weight = self.battle_weights[bf.name]
             features = np.array([
+                world.conflict_intensity,
                 base_adv,
                 area_adv,
                 area_weight,
@@ -181,4 +190,4 @@ class Agent:
         utilities = np.array(utilities)
         proportions = self._softmax(utilities)
         allocation = {name: total_to_spend * prop for name, prop in zip(names, proportions)}
-        return allocation
+        return allocation, total_to_spend

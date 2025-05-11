@@ -38,7 +38,8 @@ class World:
     def __init__(
         self,
         config_path: str,
-        battle_control_factor: float = 50.0,
+        control_transition_factor: float = 50.0,
+        initial_conflict_intensity: float = 0.3,
         max_steps: int = 50,
         npz_file: Optional[str] = None
     ):
@@ -47,7 +48,7 @@ class World:
             self.config = yaml.safe_load(f)
 
         self.max_steps = max_steps
-        self.battle_control_factor = battle_control_factor
+        self.control_transition_factor = control_transition_factor
         self.logs: Dict[str, List[Dict]] = {
             'agent_actions': [],
             'resource_allocations': [],
@@ -64,6 +65,11 @@ class World:
 
         # Instantiate agents
         self.agents = self._create_agents()
+
+        # Initialize conflict intensity
+        self.total_resources = sum(agent.resources for agent in self.agents)
+        self.total_allocations = 0.0
+        self.conflict_intensity = initial_conflict_intensity
 
     def _load_parameters(self, npz_file: Optional[str]) -> None:
         """Load weights, betas, and bottom lines from .npz or random-init."""
@@ -170,6 +176,7 @@ class World:
         agent_id: str,
         battlefield: str,
         allocated: float,
+        total_to_spend: float,
         resources: float
     ) -> None:
         self.logs['resource_allocations'].append({
@@ -177,7 +184,8 @@ class World:
             'agent': agent_id,
             'battlefield': battlefield,
             'allocated': allocated,
-            '=resources': resources
+            'total_to_spend': total_to_spend,
+            'resources': resources
         })
 
     def _log_battle_control(
@@ -242,22 +250,28 @@ class World:
             if not agent.combat:
                 continue
 
-            allocations = agent.allocate_battle(self)
+            allocations, total_to_spend = agent.allocate_battle(self)
+            self.total_allocations += total_to_spend
             for bf_name, amount in allocations.items():
                 contributions[bf_name][agent.camp] += amount
-                self._log_resource_allocation(
-                    step, agent.id, bf_name, amount, agent.resources
-                )
+                if amount > 1e-2:
+                    self._log_resource_allocation(
+                        step, agent.id, bf_name, amount, total_to_spend, agent.resources
+                    )
 
         for bf in self.battles:
             ra = contributions[bf.name]['A']
             rb = contributions[bf.name]['B']
             if ra + rb != 0:
                 control_A = bf.control[0]
-                control_A += (ra - rb) / (ra + rb) * self.battle_control_factor
+                control_A += (ra - rb) / (ra + rb) * self.control_transition_factor
                 control_A = max(0.0, min(100.0, control_A))
                 bf.control = (control_A, 100.0 - control_A)
             self._log_battle_control(step, bf.name, bf.control)
+    
+    def _update_conflict_intensity(self) -> None:
+        """Update the conflict intensity based on resource allocations."""
+        self.conflict_intensity = self.total_allocations / self.total_resources
 
     def step(self, step_num: int) -> None:
         self._process_issues(step_num)
