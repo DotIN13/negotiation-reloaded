@@ -15,13 +15,13 @@ This project implements a calibrated agent-based model (ABM) for simulating inte
 ```
 
 .
-├── agent.py                  # Agent class with negotiation and combat logic
-├── world.py                  # Simulation environment and world state
+├── agent.py                    # Agent class with negotiation and combat logic
+├── world.py                    # Simulation environment and world state
 ├── configs/
-│   └── bosnian\_war.yml       # Example conflict scenario configuration
+│   └── bosnian_war.yml         # Example conflict scenario configuration
 ├── logs/
-│   └── simulation\_results.json # Simulation output
-├── calibrate.py              # (Not implemented yet) parameter fitting using evolutionary search
+│   └── simulation_results.json # Simulation output
+├── calibrate.py                # (Not implemented yet) parameter fitting using evolutionary search
 ├── README.md
 
 ````
