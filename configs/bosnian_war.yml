@@ -1,0 +1,129 @@
+# config_bosnia_war.yaml
+
+agents:
+  - id: BIH
+    name: Republic of Bosnia and Herzegovina
+    camp: A
+    resources: 100
+    combat: true
+    # The Bosniak-led government (ARBiH), approx. 100–120k troops, lightly armed, no air power.
+
+  - id: HVO
+    name: Croatian Republic of Herzeg-Bosna
+    camp: A
+    resources: 60
+    combat: true
+    # Bosnian Croat force, ~40–50k troops, some armor/artillery, no air power.
+
+  - id: SRP
+    name: Republika Srpska
+    camp: B
+    resources: 160
+    combat: true
+    # Bosnian Serb force (VRS), ~80k troops, extensive heavy weapons, only air power in Bosnia.
+
+  - id: HRV
+    name: Republic of Croatia
+    camp: A
+    resources: 130
+    combat: true
+    # Croatian Army, 15k troops active in Bosnia, tanks, artillery, limited covert air support.
+
+  - id: YUG
+    name: Federal Republic of Yugoslavia (Serbia & Montenegro)
+    camp: B
+    resources: 200
+    combat: true
+    # Yugoslav Army (VJ), >100k troops, vast heavy arsenal, full air force.
+
+  - id: USA
+    name: United States
+    camp: A
+    resources: 150
+    combat: false
+    # Major diplomatic force; no ground troops in Bosnia in 1992.
+
+  - id: NATO
+    name: NATO
+    camp: A
+    resources: 300
+    combat: true
+    # No ground forces in 1992, maritime and air monitoring began late 1992.
+
+  - id: UN
+    name: United Nations
+    camp: A
+    resources: 20
+    combat: true
+    # UNPROFOR light peacekeepers, ~2–4k troops by late 1992, lightly armed.
+
+  - id: EU
+    name: European Union
+    camp: neutral
+    resources: 100
+    combat: false
+    # Early mediator with civilian monitors; limited direct military role.
+
+  - id: CTG
+    name: Contact Group
+    camp: neutral
+    resources: 80
+    combat: false
+    # Diplomatic framework including US, UK, France, Germany, Russia, Italy.
+
+issues:
+  - name: territory_division
+  - name: constitutional_framework
+  - name: arms_control
+  - name: refugee_return
+  - name: elections
+  - name: international_oversight
+
+battlefields:
+  - name: Sarajevo
+    lat: 43.8564
+    lng: 18.4130
+    control: [55, 45]
+    # Government-held city core with ARBiH; Serb control of surrounding hills.
+
+  - name: Mostar
+    lat: 43.3436
+    lng: 17.8075
+    control: [100, 0]
+    # Joint ARBiH–HVO control after Serb expulsion in June 1992.
+
+  - name: Srebrenica
+    lat: 44.1042
+    lng: 19.2972
+    control: [70, 30]
+    # Bosniak-held enclave under siege.
+
+  - name: Tuzla
+    lat: 44.5381
+    lng: 18.6761
+    control: [100, 0]
+    # Fully government-held city with no Serb presence.
+
+  - name: Bihac
+    lat: 44.8147
+    lng: 15.8692
+    control: [80, 20]
+    # Bosniak/HVO-controlled enclave, surrounded by Serbs.
+
+  - name: Gorazde
+    lat: 43.6686
+    lng: 18.9756
+    control: [80, 20]
+    # Bosniak-held eastern town under siege.
+
+  - name: Banja_Luka
+    lat: 44.7725
+    lng: 17.1925
+    control: [0, 100]
+    # Largest RS-held city and VRS headquarters.
+
+  - name: Brcko
+    lat: 44.8772
+    lng: 18.8111
+    control: [0, 100]
+    # Strategic Serb-held corridor, seized in spring 1992.
