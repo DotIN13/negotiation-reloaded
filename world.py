@@ -279,7 +279,7 @@ class World:
 if __name__ == '__main__':
     import sys
 
-    cfg = sys.argv[1] if len(sys.argv) > 1 else 'config.yaml'
+    cfg = sys.argv[1] if len(sys.argv) > 1 else 'configs/bosnian_war.yml'
     npz = sys.argv[2] if len(sys.argv) > 2 else None
 
     world = World(cfg, max_steps=20, npz_file=npz)
