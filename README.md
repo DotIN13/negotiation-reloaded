@@ -34,10 +34,7 @@ This project implements a calibrated agent-based model (ABM) for simulating inte
    cd negotiation-reloaded
    ```
 
-2. Install dependencies:
-
-  Ensure you have Python 3.10 or later installed. Then run:
-
+2. Install dependencies: Ensure you have Python 3.10 or later installed.
    ```bash
    pip install numpy pyyaml
    ```
