@@ -140,7 +140,7 @@ class Agent:
     def compute_spend_fraction(self, world) -> float:
         """
         Determine fraction of resources to invest in all battlefields this step.
-        Uses sigmoid(resource_beta · [military_advantage, resources, total_surplus]).
+        TODO: The features should be normalized to avoid constant 1.0 from sigmoids.
         """
         adv = world.get_military_advantage(self)
         resources = self.resources

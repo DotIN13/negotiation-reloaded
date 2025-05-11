@@ -53,7 +53,8 @@ class World:
             'agent_actions': [],
             'resource_allocations': [],
             'battle_controls': [],
-            'resolved_issues': []
+            'resolved_issues': [],
+            'conflict_intensity': []
         }
 
         # Initialize simulation entities
@@ -88,11 +89,11 @@ class World:
         else:
             # Random initialization for all agents
             self.issue_weights = {
-                aid: {iss: np.random.rand() + 0.5 for iss in issue_names}
+                aid: {iss: np.random.rand() for iss in issue_names}
                 for aid in ids
             }
             self.battle_weights = {
-                aid: {bf: np.random.rand() + 0.5 for bf in battle_names}
+                aid: {bf: np.random.rand() for bf in battle_names}
                 for aid in ids
             }
             self.issue_betas = {
@@ -212,6 +213,12 @@ class World:
             'final_proposal': final_proposal
         })
 
+    def _log_conflict_intensity(self, step: int) -> None:
+        self.logs['conflict_intensity'].append({
+            'step': step,
+            'conflict_intensity': self.conflict_intensity
+        })
+
     # --- Simulation Steps ---
     def _process_issues(self, step: int) -> None:
         for agent in self.agents:
@@ -269,13 +276,16 @@ class World:
                 bf.control = (control_A, 100.0 - control_A)
             self._log_battle_control(step, bf.name, bf.control)
     
-    def _update_conflict_intensity(self) -> None:
+    def _update_conflict_intensity(self, step_num) -> None:
         """Update the conflict intensity based on resource allocations."""
+        self._log_conflict_intensity(step_num)
         self.conflict_intensity = self.total_allocations / self.total_resources
+        self.total_allocations = 0.0
 
     def step(self, step_num: int) -> None:
         self._process_issues(step_num)
         self._process_battles(step_num)
+        self._update_conflict_intensity(step_num)
 
     def run(self) -> Dict[str, List[Dict]]:
         for step in range(self.max_steps):
