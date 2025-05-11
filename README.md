@@ -1,4 +1,4 @@
-# Multi-Agent Simulation of Crisis Negotiation and Armed Conflict
+# Multi-Agent Simulation of Crisis Resolution
 
 This project implements a calibrated agent-based model (ABM) for simulating international conflict resolution. The model integrates bargaining over political issues with dynamic military resource allocation, enabling researchers to explore how states and actors balance coercion and negotiation during crises.
 
