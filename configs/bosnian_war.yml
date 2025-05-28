@@ -83,47 +83,39 @@ battlefields:
   - name: Sarajevo
     lat: 43.8564
     lng: 18.4130
-    control: [55, 45]
     # Government-held city core with ARBiH; Serb control of surrounding hills.
 
   - name: Mostar
     lat: 43.3436
     lng: 17.8075
-    control: [100, 0]
     # Joint ARBiH–HVO control after Serb expulsion in June 1992.
 
   - name: Srebrenica
     lat: 44.1042
     lng: 19.2972
-    control: [70, 30]
     # Bosniak-held enclave under siege.
 
   - name: Tuzla
     lat: 44.5381
     lng: 18.6761
-    control: [100, 0]
     # Fully government-held city with no Serb presence.
 
   - name: Bihac
     lat: 44.8147
     lng: 15.8692
-    control: [80, 20]
     # Bosniak/HVO-controlled enclave, surrounded by Serbs.
 
   - name: Gorazde
     lat: 43.6686
     lng: 18.9756
-    control: [80, 20]
     # Bosniak-held eastern town under siege.
 
   - name: Banja_Luka
     lat: 44.7725
     lng: 17.1925
-    control: [0, 100]
     # Largest RS-held city and VRS headquarters.
 
   - name: Brcko
     lat: 44.8772
     lng: 18.8111
-    control: [0, 100]
     # Strategic Serb-held corridor, seized in spring 1992.

@@ -5,11 +5,13 @@ This module implements an agent-based model for simulating negotiation and confl
 between multiple parties. The model tracks issue resolution and battlefield control over time.
 """
 
+from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import List, Dict, Tuple, Optional
 import json
 import yaml
 import numpy as np
+
 from agent import Agent
 
 # -------------------------------
@@ -39,12 +41,10 @@ class Battlefield:
         name: Unique identifier for the battlefield  
         lat: Latitude coordinate (optional)
         lng: Longitude coordinate (optional)
-        control: Current control as (A_control, B_control) percentages
     """
     name: str
     lat: Optional[float] = None
     lng: Optional[float] = None
-    control: Tuple[float, float] = (50.0, 50.0)
 
 # -------------------------------
 # Main Simulation Environment
@@ -70,8 +70,10 @@ class World:
     def __init__(
         self,
         config_path: str,
-        control_transition_factor: float = 50.0,
         initial_conflict_intensity: float = 0.3,
+        initial_negotiation_tension: float = 0.3,
+        negotiation_tension_factor: float = 0.05,
+        resolved_threshold: float = 0.75, # Threshold for early termination
         max_steps: int = 50,
         npz_file: Optional[str] = None
     ):
@@ -80,28 +82,55 @@ class World:
             self.config = yaml.safe_load(f)
 
         # Simulation parameters
-        self.max_steps = max_steps
-        self.control_transition_factor = control_transition_factor
         self.conflict_intensity = initial_conflict_intensity
+        self.negotiation_tension = initial_negotiation_tension
+        self.negotiation_tension_factor = negotiation_tension_factor
+        
+        # Termination conditions
+        self.max_steps = max_steps
+        self.resolved_threshold = resolved_threshold
         
         # Initialize data structures
         self._initialize_logging()
         self._initialize_world_entities()
         self._load_parameters(npz_file)
+        self.camps = defaultdict(int)  # Track number of agents per camp
         self.agents = self._create_agents()
         
         # Calculate initial global metrics
         self.total_resources = sum(agent.resources for agent in self.agents)
         self.total_allocations = 0.0  # Tracks military spending per step
+        self.max_resources = max(agent.resources for agent in self.agents)
+        self.last_step_actions = self._new_last_step_actions()
+        self.current_step_actions = self._new_last_step_actions()
+
+    def _new_last_step_actions(self):
+        """Reset last step actions for negotiation and battlefield domains."""
+        actions = {
+            "negotiation": {},
+            "battlefield": {}
+        }
+        
+        for issue in self.issues:
+            actions["negotiation"][issue.name] = {}
+            for camp in self.camps:
+                actions["negotiation"][issue.name][camp] = defaultdict(int)
+        
+        for bf in self.battles:
+            actions["battlefield"][bf.name] = {}
+            for camp in self.camps:
+                actions["battlefield"][bf.name][camp] = defaultdict(int)
+
+        return actions
 
     def _initialize_logging(self):
         """Set up data structures for recording simulation history."""
         self.logs = {
             'agent_actions': [],       # All agent decisions
-            'resource_allocations': [], # Military spending details  
-            'battle_controls': [],      # Battlefield state changes
             'resolved_issues': [],      # Successful negotiations
-            'conflict_intensity': []    # Global tension metrics
+            'conflict_intensity': [],    # Global tension metrics
+            'battle_actions': [],       # Battlefield engagement decisions
+            'battle_outcomes': []       # Results of military engagements
         }
 
     def _initialize_world_entities(self):
@@ -133,7 +162,6 @@ class World:
             self.issue_weights = data['weights_issues'].item()
             self.battle_weights = data['weights_battlefield'].item()
             self.issue_betas = data['betas_issues'].item()
-            self.resource_betas = data['betas_resource'].item()
             self.battle_betas = data['betas_battlefield'].item()
             self.issue_bottomlines = data['issue_bottomlines'].item()
         else:
@@ -147,19 +175,15 @@ class World:
                 for aid in agent_ids
             }
             self.issue_betas = {
-                aid: {iss: np.random.randn(Agent.NUM_ISSUE_FEATURES) for iss in issue_names}
-                for aid in agent_ids
-            }
-            self.resource_betas = {
-                aid: np.random.randn(Agent.NUM_RESOURCE_FEATURES)
+                aid: {iss: np.random.randn(4, Agent.NUM_ISSUE_FEATURES) for iss in issue_names}
                 for aid in agent_ids
             }
             self.battle_betas = {
-                aid: np.random.randn(Agent.NUM_BATTLE_FEATURES)
+                aid: {bf: np.random.randn(2, Agent.NUM_BATTLE_FEATURES) for bf in battle_names}
                 for aid in agent_ids
             }
             self.issue_bottomlines = {
-                aid: {iss: np.random.rand() * 75 for iss in issue_names}
+                aid: {iss: np.random.rand() * 50 for iss in issue_names}
                 for aid in agent_ids
             }
 
@@ -170,80 +194,68 @@ class World:
         for agent_cfg in self.config['agents']:
             agent_id = agent_cfg['id']
             agents.append(Agent(
-                id=agent_id,
+                agent_id=agent_id,
                 camp=agent_cfg['camp'],
                 resources=float(agent_cfg['resources']),
                 combat=agent_cfg['combat'],
                 issue_weights=self.issue_weights[agent_id],
                 battle_weights=self.battle_weights[agent_id],
                 issue_betas=self.issue_betas[agent_id],
-                resource_beta=self.resource_betas[agent_id],
-                battle_beta=self.battle_betas[agent_id],
+                battle_betas=self.battle_betas[agent_id],
                 issue_bottomlines=self.issue_bottomlines[agent_id]
             ))
+            self.camps[agent_cfg['camp']] += 1  # Count agents per camp
         return agents
 
     # -------------------------------
     # Game Mechanics
     # -------------------------------
 
-    def get_military_advantage(self, agent: Agent) -> float:
-        """Calculate agent's relative military advantage across all battlefields.
-        
-        Computes weighted sum of control differences from agent's perspective.
-        Positive values indicate advantage, negative values indicate disadvantage.
-        """
-        total_advantage = 0.0
-        for bf in self.battles:
-            control_A, control_B = bf.control
-            weight = agent.battle_weights[bf.name]
-            # Calculate advantage from this agent's perspective
-            diff = (control_A - control_B) if agent.camp == 'A' else (control_B - control_A)
-            total_advantage += weight * diff
-        return total_advantage
+    def get_ally_support(self, agent: Agent, action_type: str, name: str) -> float:
+        """Calculate support from allies"""
+        if self.camps[agent.camp] == 0:
+            return 1.0
+        if action_type == "negotiation":
+            return self.last_step_actions[action_type][name][agent.camp]["accept"] / self.camps[agent.camp]
+        if action_type == "battlefield":
+            return self.last_step_actions[action_type][name][agent.camp]["engage"] / self.camps[agent.camp]
 
-    def get_ally_support(self, agent: Agent, domain: str, name: str) -> float:
-        """TODO: Calculate support from allies (placeholder for future implementation)."""
-        return 0.0
-
-    def get_neutral_support(self, agent: Agent, domain: str, name: str) -> float:
-        """TODO: Calculate support from neutral parties (placeholder for future implementation)."""
-        return 0.0
+    def get_neutral_support(self, action_type: str, name: str) -> float:
+        """Calculate support from neutral parties"""
+        neutral_camp = 'neutral'
+        if self.camps[neutral_camp] == 0:
+            return 1.0
+        if action_type == "negotiation":
+            return self.last_step_actions[action_type][name][neutral_camp]["accept"] / self.camps[neutral_camp]
+        if action_type == "battlefield":
+            return self.last_step_actions[action_type][name][neutral_camp]["engage"] / self.camps[neutral_camp]
 
     # -------------------------------
     # Logging Helpers
     # -------------------------------
 
-    def _log_agent_action(self, step: int, agent_id: str, domain: str, 
-                         name: str, action: str, proposal: Optional[Tuple[float, float]]):
+    def _log_agent_action(self, step: int, agent: str,
+                          issue: str, action: str, proposal: Optional[Tuple[float, float]]):
         """Record an agent's decision in the simulation logs."""
+        self.current_step_actions["negotiation"][issue][agent.camp][action] += 1
         self.logs['agent_actions'].append({
             'step': step,
-            'agent': agent_id,
-            'domain': domain,
-            'name': name,
+            'agent_id': agent.id,
+            'action_type': "negotiation",
+            'issue': issue,
             'action': action,
             'proposal': proposal
         })
-
-    def _log_resource_allocation(self, step: int, agent_id: str, battlefield: str,
-                               allocated: float, total_to_spend: float, resources: float):
-        """Record military resource allocation details."""
-        self.logs['resource_allocations'].append({
+        
+    def _log_battle_action(self, step: int, agent: str, action: str, battlefield_name: str):
+        """Record an agent's battlefield action in the logs."""
+        self.current_step_actions["battlefield"][battlefield_name][agent.camp][action] += 1
+        self.logs['battle_actions'].append({
             'step': step,
-            'agent': agent_id,
-            'battlefield': battlefield,
-            'allocated': allocated,
-            'total_to_spend': total_to_spend,
-            'resources': resources
-        })
-
-    def _log_battle_control(self, step: int, battlefield: str, control: Tuple[float, float]):
-        """Record updated battlefield control state."""
-        self.logs['battle_controls'].append({
-            'step': step,
-            'battlefield': battlefield,
-            'control': control
+            'agent_id': agent.id,
+            'action_type': "battlefield",
+            'action': action,
+            'battlefield': battlefield_name
         })
 
     def _log_resolved_issue(self, step: int, issue_name: str, final_proposal: Tuple[float, float]):
@@ -287,7 +299,7 @@ class World:
 
                 # Log the action
                 self._log_agent_action(
-                    step, agent.id, 'issue', issue.name, 
+                    step, agent, issue.name,
                     action, proposal or issue.proposal
                 )
 
@@ -306,48 +318,38 @@ class World:
                             share = issue.proposal[0] if a.camp == 'A' else issue.proposal[1]
                             a.total_surplus += a.issue_weights[issue.name] * share
                 elif action == 'reject':
-                    issue.accepted_by.clear()
+                    if agent.id in issue.accepted_by:
+                        # If agent rejects, remove from accepted set
+                        issue.accepted_by.remove(agent.id)
 
     def _process_battles(self, step: int) -> None:
-        """Handle military resource allocation and battlefield updates.
-        
-        Processes:
-        - Agent resource allocation decisions
-        - Battlefield control updates
-        - Resource spending tracking
-        """
-        # Track contributions from each camp per battlefield
-        contributions = {bf.name: {'A': 0.0, 'B': 0.0} for bf in self.battles}
-
-        for agent in self.agents:
-            if not agent.combat:
-                continue  # Skip non-combatants
-
-            # Get agent's allocation decisions
-            allocations, total_to_spend = agent.allocate_battle(self)
-            self.total_allocations += total_to_spend
-
-            # Record allocations
-            for bf_name, amount in allocations.items():
-                contributions[bf_name][agent.camp] += amount
-                if amount > 1e-2:  # Only log significant allocations
-                    self._log_resource_allocation(
-                        step, agent.id, bf_name, 
-                        amount, total_to_spend, agent.resources
-                    )
-
-        # Update battlefield control based on contributions
         for bf in self.battles:
-            ra = contributions[bf.name]['A']
-            rb = contributions[bf.name]['B']
-            
-            if ra + rb > 0:
-                # Calculate control change based on relative contributions
-                delta = (ra - rb) / (ra + rb) * self.control_transition_factor
-                control_A = max(0.0, min(100.0, bf.control[0] + delta))
-                bf.control = (control_A, 100.0 - control_A)
-            
-            self._log_battle_control(step, bf.name, bf.control)
+            contributions = {'A': 0.0, 'B': 0.0}
+            # Agents decide to engage
+            for agent in self.agents:
+                if not agent.combat:
+                    continue
+                
+                action = agent.decide_battle(bf, self)
+
+                if action == 'engage':
+                    contributions[agent.camp] += agent.resources
+                    self.total_allocations += agent.resources
+                    self._log_battle_action(step, agent, action, bf.name)
+
+            total = contributions['A'] + contributions['B']
+            if total > 0:
+                p_A = contributions['A'] / total
+                winner = 'A' if np.random.rand() < p_A else 'B'
+                self.logs['battle_outcomes'].append({
+                    'step': step,
+                    'battlefield': bf.name,
+                    'winner': winner
+                })
+    
+    def resolved_ratio(self) -> float:
+        """Calculate the ratio of resolved issues to total issues."""
+        return sum(issue.settled for issue in self.issues) / len(self.issues)
 
     def _update_conflict_intensity(self, step_num: int) -> None:
         """Update global conflict intensity metric based on recent military spending.
@@ -358,6 +360,13 @@ class World:
         self._log_conflict_intensity(step_num)
         self.conflict_intensity = self.total_allocations / self.total_resources
         self.total_allocations = 0.0  # Reset for next step
+        
+    def _update_negotiation_tension(self) -> None:
+        """Update negotiation tension based on unresolved issues.
+        
+        Tension increases with unresolved issues, simulating negotiation pressure.
+        """
+        self.negotiation_tension += self.negotiation_tension_factor * (1 - self.resolved_ratio())
 
     def step(self, step_num: int) -> None:
         """Execute one complete simulation step.
@@ -370,6 +379,9 @@ class World:
         self._process_issues(step_num)
         self._process_battles(step_num)
         self._update_conflict_intensity(step_num)
+        self._update_negotiation_tension()
+        self.last_step_actions = self.current_step_actions
+        self.current_step_actions = self._new_last_step_actions()
 
     def run(self) -> Dict[str, List[Dict]]:
         """Execute full simulation sequence.
@@ -382,7 +394,7 @@ class World:
         """
         for step in range(self.max_steps):
             self.step(step)
-            if all(issue.settled for issue in self.issues):
+            if self.resolved_ratio() >= self.resolved_threshold:
                 break  # Early termination if all issues resolved
 
         # Save logs to file
@@ -402,5 +414,5 @@ if __name__ == '__main__':
     npz_file = sys.argv[2] if len(sys.argv) > 2 else None
 
     # Initialize and run simulation
-    world = World(config_file, max_steps=20, npz_file=npz_file)
+    world = World(config_file, max_steps=1000, npz_file=npz_file)
     logs = world.run()
