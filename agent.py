@@ -1,41 +1,17 @@
-"""
-Agent module for the ABM simulation framework.
-
-Defines the Agent class which represents actors in the simulation with decision-making capabilities
-for both negotiation (issues) and conflict (battlefields) domains.
-"""
-
 from typing import Dict, Tuple, Optional, TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
     from world import World
 
-class Agent:
-    """Represents an autonomous actor in the simulation with decision-making capabilities.
-    
-    Each agent has:
-    - Unique identity and faction affiliation
-    - Military resources to allocate
-    - Preferences over issues and battlefields
-    - Behavioral parameters for decision-making
-    
-    Attributes:
-        id (str): Unique identifier for the agent
-        camp (str): Faction affiliation ('A', 'B', or 'neutral')
-        resources (float): Current military resource amount
-        combat (bool): Whether the agent can participate in military actions
-        issue_weights (Dict[str, float]): Importance weights for each negotiable issue
-        battle_weights (Dict[str, float]): Importance weights for each battlefield
-        total_surplus (float): Cumulative surplus from successful negotiations
-        issue_betas (Dict[str, np.ndarray]): Decision parameters for issue actions
-        battle_beta (np.ndarray): Parameters for battlefield allocation decisions
-        issue_bottomlines (Dict[str, float]): Minimum acceptable shares for each issue
-    """
 
-    # Constants defining feature space dimensions
-    NUM_ISSUE_FEATURES = 6      # Number of features for issue decisions
-    NUM_BATTLE_FEATURES = 6     # Number of features for allocation decisions
+class Agent:
+    """Agent with decision logic for both negotiation (issues) and conflict (battlefields)."""
+
+    ACTIONS_ISSUE = ['compromise', 'accept', 'demand', 'idle']
+    ACTIONS_BATTLE = ['engage', 'idle']
+    NUM_ISSUE_FEATURES = 4
+    NUM_BATTLE_FEATURES = 4
 
     def __init__(
         self,
@@ -43,173 +19,175 @@ class Agent:
         camp: str,
         resources: float,
         combat: bool,
-        issue_weights: Dict[str, float], # Sum to 1.0 across issues
-        battle_weights: Dict[str, float], # Sum to 1.0 across battlefields
+        issue_weights: Dict[str, float],
+        battle_weights: Dict[str, float],
         issue_betas: Dict[str, np.ndarray],
         battle_betas: Dict[str, np.ndarray],
         issue_bottomlines: Dict[str, float]
     ):
-        """Initialize an agent with given parameters and attributes.
-        
-        Args:
-            agent_id: Unique identifier string
-            camp: Faction identifier ('A', 'B', or 'neutral')
-            resources: Starting military resources
-            combat: Whether agent can participate in military actions
-            issue_weights: Importance weights for each issue
-            battle_weights: Importance weights for each battlefield
-            issue_betas: Decision parameters for issue actions
-            battle_betas: Parameters for battlefield allocations
-            issue_bottomlines: Minimum acceptable shares per issue
-        """
         self.id = agent_id
         self.camp = camp
         self.resources = resources
         self.combat = combat
 
-        # Decision model parameters
+        # Decision parameters
         self.issue_weights = issue_weights
         self.battle_weights = battle_weights
         self.issue_betas = issue_betas
         self.battle_betas = battle_betas
         self.issue_bottomlines = issue_bottomlines
 
-        # Initialize properties
+        # Track surpluses
         self.total_surplus = 0.0
-        self.total_surplus_possible = 100 * len(issue_bottomlines) - sum(issue_bottomlines.values())
+        max_surplus = 100 * len(issue_bottomlines) - \
+            sum(issue_bottomlines.values())
+        self.total_surplus_possible = max_surplus if max_surplus > 0 else 1.0
 
     @staticmethod
-    def _softmax(values: np.ndarray) -> np.ndarray:
-        """Compute numerically stable softmax probabilities.
-        
-        Args:
-            values: Input array of raw values
-            
-        Returns:
-            Array of probabilities summing to 1
-        """
-        shifted = values - np.max(values)  # For numerical stability
+    def _softmax(logits: np.ndarray) -> np.ndarray:
+        shifted = logits - np.max(logits)
         exps = np.exp(shifted)
         return exps / np.sum(exps)
 
     def decide_issue(
         self,
-        issue: str,
+        issue,
         world: 'World'
     ) -> Tuple[str, Optional[Tuple[float, float]]]:
-        """Make a decision about an issue in the current state.
-        
-        Agents can:
-        - Propose a new allocation (must exceed their bottomline)
-        - Accept the current proposal
-        - Reject the current proposal
-        - Remain idle
-        
-        Args:
-            issue: The issue object being decided on
-            world: Reference to the world state
-            
-        Returns:
-            Tuple containing:
-            - Action string ('propose', 'accept', 'reject', or 'idle')
-            - New proposal tuple if proposing, else None
-        """
         if issue.settled:
-            return 'idle', None  # No action if issue already resolved
-        
-        actions = ['propose', 'accept', 'reject', 'idle']
+            return 'idle', None
 
-        # Calculate current surplus relative to bottom line
-        bottomline = self.issue_bottomlines[issue.name]
-        if issue.proposal:
-            share_A, share_B = issue.proposal
-            my_share = share_A if self.camp == 'A' else share_B
-            surplus = (my_share - bottomline) / (100.0 - bottomline)  # Normalize to [0, 1]
-        else:
-            surplus = 0.0
+        # 1) Compute normalized surpluses
+        surplus = self._compute_normalized_surplus(issue)
+        total_surplus = self.total_surplus / self.total_surplus_possible
 
-        # Construct features for decision making
-        features = {
-            'conflict_intensity': world.conflict_intensity,
-            'weight': self.issue_weights[issue.name],
-            'surplus': surplus,
-            'total_surplus': self.total_surplus / self.total_surplus_possible,
-            'ally_support': world.get_ally_support(self, 'negotiation', issue.name),
-            'neutral_support': world.get_neutral_support('negotiation', issue.name)
-        }
-        
-        feature_vec = [
-            features['conflict_intensity'],
-            features['weight'],
-            features['surplus'],
-            features['total_surplus'],
-            features['ally_support'],
-            features['neutral_support']
-        ]
+        # 2) Build base utilities via feature vector
+        features = self._issue_feature_vector(issue, world)
+        beta = self.issue_betas[issue.name]                    # shape (4, 4)
+        utilities = beta.dot(features)                         # shape (4,)
 
-        # Compute action probabilities using softmax
-        beta = self.issue_betas[issue.name] # (4, 6)
-        utilities = beta.dot(feature_vec) # (4,)
-        probs = self._softmax(utilities)
+        # 3) Compute decision offsets
+        offsets = self._issue_offsets(world, surplus, total_surplus)
+        ally_offsets = world.build_external_pressure_offsets(
+            self.camp, "negotiation", issue.name, self.ACTIONS_ISSUE
+        )
+        offsets += world.external_pressure_factor * ally_offsets
 
-        # Select action probabilistically
-        action = np.random.choice(actions, p=probs)
+        # 4) Softmax + offsets → final probabilities
+        probs = self._softmax(utilities) + offsets
+        probs = np.clip(probs, 0, None)
+        probs /= probs.sum()
 
-        if action == 'propose':
-            # Generate new proposal that exceeds bottom line
-            if self.camp == 'A':
-                new_A = np.random.uniform(bottomline, 100.0)
-                return 'propose', (new_A, 100.0 - new_A)
+        # 5) Sample action
+        action = np.random.choice(self.ACTIONS_ISSUE, p=probs)
 
-            new_B = np.random.uniform(bottomline, 100.0)
-            return 'propose', (100.0 - new_B, new_B)
+        if action in ['compromise', 'demand']:
+            return self._make_proposal(issue, action, world)
 
         return action, None
 
     def decide_battle(
         self,
-        battlefield: str,
+        battlefield,
         world: 'World'
     ) -> str:
-        """Make a decision about military action in a battlefield.
-        
-        Agents can:
-        - Engage conflict (commit resources)
-        - Remain idle (do nothing)
+        if not self.combat:
+            return 'idle'
 
-        Args:
-            battlefield: The battlefield object being decided on
-            world: Reference to the world state
-            
-        Returns:
-            Action string ('engage' or 'idle')
-        """
-        actions = ['engage', 'idle']
+        # 1) Feature vector for battle
+        features = self._battle_feature_vector(battlefield, world)
+        beta = self.battle_betas[battlefield.name]              # shape (2, 4)
+        utilities = beta.dot(features)                         # shape (2,)
 
-        # Gather features parallel to decide_issue
-        features = {
-            'conflict_intensity': world.conflict_intensity,
-            'weight': self.battle_weights.get(battlefield.name, 0.0),
-            'resources': self.resources / world.max_resources,
-            'total_surplus': self.total_surplus / self.total_surplus_possible,
-            'ally_support': world.get_ally_support(self, 'battlefield', battlefield.name),
-            'neutral_support': world.get_neutral_support('battlefield', battlefield.name),
-        }
+        # 2) Offsets from allies
+        offsets = world.build_external_pressure_offsets(
+            self.camp, "battlefield", battlefield.name, self.ACTIONS_BATTLE
+        ) * world.external_pressure_factor
 
-        feature_vec = np.array([
-            features['conflict_intensity'],
-            features['weight'],
-            features['resources'],
-            features['total_surplus'],
-            features['ally_support'],
-            features['neutral_support']
+        # 3) Softmax + offsets → probabilities
+        probs = self._softmax(utilities) + offsets
+        probs = np.clip(probs, 0, None)
+        probs /= probs.sum()
+
+        # 4) Sample and return
+        return np.random.choice(self.ACTIONS_BATTLE, p=probs)
+
+    # -------------------------------
+    # Private helpers
+    # -------------------------------
+
+    def _compute_normalized_surplus(self, issue) -> float:
+        """Surplus relative to bottomline, normalized to [0,1]."""
+        bottom = self.issue_bottomlines[issue.name]
+        if not issue.proposal:
+            return 0.0
+
+        share = issue.proposal[0] if self.camp == 'A' else issue.proposal[1]
+        raw = max(0.0, share - bottom)
+        return raw / (100.0 - bottom)
+
+    def _issue_feature_vector(self, issue, world: 'World') -> np.ndarray:
+        """Construct feature vector for issue utilities."""
+        return np.array([
+            world.negotiation_tension,
+            world.conflict_intensity,
+            self.issue_weights[issue.name],
+            self.resources / world.max_resources
         ])
 
-        # Compute utilities for both actions
-        beta = self.battle_betas[battlefield.name]  # (2, 6)
-        utils = beta.dot(feature_vec)  # (2,)
-        probs = self._softmax(utils)
+    def _battle_feature_vector(self, battlefield, world: 'World') -> np.ndarray:
+        """Construct feature vector for battle utilities."""
+        return np.array([
+            world.negotiation_tension,
+            world.conflict_intensity,
+            self.battle_weights.get(battlefield.name, 0.0),
+            self.resources / world.max_resources
+        ])
 
-        # Sample action
-        decision = np.random.choice(actions, p=probs)
-        return decision
+    def _issue_offsets(self, world, surplus: float, total_surplus: float) -> np.ndarray:
+        """Compute surplus- and fatigue-based offsets for issue decisions."""
+        sf, ff = world.surplus_factor, world.fatigue_factor
+        # compromise/demand get negative boost when surplus high; accept gets positive
+        return np.array([
+            -sf * surplus - sf * total_surplus,              # compromise
+            sf * surplus + sf * total_surplus + ff * world.fatigue,  # accept
+            -sf * surplus - sf * total_surplus,              # demand
+            sf * total_surplus                              # idle
+        ])
+
+    def _make_proposal(
+        self,
+        issue,
+        action: str,
+        world: 'World'
+    ) -> Tuple[str, Tuple[float, float]]:
+        """
+        For compromise: pick a new share ~ N(mean(bottom, current), σ), 
+        for demand: ~ N(mean(current,100), σ), truncated [0,100].
+        """
+        bottom = self.issue_bottomlines[issue.name]
+
+        # 1) what was current share?
+        if issue.proposal:
+            current = issue.proposal[0] if self.camp == 'A' else issue.proposal[1]
+        else:
+            # if no current proposal, start at bottom‐line
+            current = bottom
+
+        # 2) compute the target mean
+        if action == 'compromise':
+            mean = 0.5 * (bottom + current)
+        else:  # 'demand'
+            mean = 0.5 * (current + 100.0)
+
+        # 3) sample (using a normal with σ=10 here, but you can tweak σ)
+        raw = np.random.normal(loc=mean, scale=world.proposal_std)
+        proposal_value = float(np.clip(raw, 0.0, 100.0))
+
+        # 4) build the (A,B) tuple
+        if self.camp == 'A':
+            A, B = proposal_value, 100.0 - proposal_value
+        else:
+            B, A = proposal_value, 100.0 - proposal_value
+
+        return action, (A, B)

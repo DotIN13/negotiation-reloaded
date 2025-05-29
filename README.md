@@ -53,7 +53,7 @@ Simulation results will be saved in `logs/simulation_results.json`.
 
 The output JSON contains logs for:
 
-* `agent_actions`: proposals, acceptances, and rejections on issues.
+* `agent_actions`: proposals, acceptances, and demandions on issues.
 * `resource_allocations`: battlefield-specific resource use by agents.
 * `battle_controls`: control shares over contested areas over time.
 * `resolved_issues`: final settled outcomes and shares.

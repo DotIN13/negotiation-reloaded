@@ -45,6 +45,7 @@ class Battlefield:
     name: str
     lat: Optional[float] = None
     lng: Optional[float] = None
+    intensity: float = 0.0
 
 # -------------------------------
 # Main Simulation Environment
@@ -70,9 +71,15 @@ class World:
     def __init__(
         self,
         config_path: str,
-        initial_conflict_intensity: float = 0.3,
+        initial_conflict_intensity: float = 1.0,
         initial_negotiation_tension: float = 0.3,
         negotiation_tension_factor: float = 0.05,
+        initial_fatigue: float = 0.0,
+        fatigue_change_factor: float = 0.01,
+        fatigue_factor: float = 0.3,
+        surplus_factor: float = 0.3,
+        external_pressure_factor: float = 0.3,
+        proposal_std: float = 5.0,  # Standard deviation for proposal generation
         resolved_threshold: float = 0.75, # Threshold for early termination
         max_steps: int = 50,
         npz_file: Optional[str] = None
@@ -85,6 +92,16 @@ class World:
         self.conflict_intensity = initial_conflict_intensity
         self.negotiation_tension = initial_negotiation_tension
         self.negotiation_tension_factor = negotiation_tension_factor
+        
+        # Fatigue model parameters
+        self.fatigue = initial_fatigue
+        self.fatigue_change_factor = fatigue_change_factor
+        
+        # Decision-making parameters
+        self.fatigue_factor = fatigue_factor
+        self.surplus_factor = surplus_factor
+        self.external_pressure_factor = external_pressure_factor
+        self.proposal_std = proposal_std
         
         # Termination conditions
         self.max_steps = max_steps
@@ -122,6 +139,41 @@ class World:
                 actions["battlefield"][bf.name][camp] = defaultdict(int)
 
         return actions
+    
+    def build_external_pressure_offsets(
+        self,
+        camp: str,
+        action_type: str,
+        name: str,
+        actions: List[str],
+    ) -> np.ndarray:
+        """
+        Build offsets based on the percentage of allies who took each action
+        in the previous step.
+
+        Args:
+            camp: The camp of the agent (e.g. 'A', 'B', 'neutral').
+            action_type: Either 'negotiation' or 'battlefield'.
+            name: Issue or battlefield name.
+            actions: List of possible actions (e.g. ['compromise', 'accept', 'demand', 'idle']).
+            scale: Scaling factor for the offsets (default: 1.0).
+
+        Returns:
+            np.ndarray of offsets aligned with the action order.
+        """
+        if self.camps[camp] == 0:
+            # No allies, no offset
+            return np.zeros(len(actions))
+
+        offsets = []
+        for action in actions:
+            # Percentage of allies who chose this action
+            count = self.last_step_actions[action_type][name][camp][action]
+            fraction = count / self.camps[camp]
+            offsets.append(fraction)  # Positive offset if allies did it
+
+        return np.array(offsets)
+
 
     def _initialize_logging(self):
         """Set up data structures for recording simulation history."""
@@ -282,7 +334,7 @@ class World:
         
         Processes:
         - Proposal generation
-        - Acceptance/rejection decisions
+        - Acceptance/demandion decisions
         - Resolution tracking
         """
         for agent in self.agents:
@@ -294,7 +346,7 @@ class World:
                 action, proposal = agent.decide_issue(issue, self)
                 
                 # Skip if no valid proposal exists yet
-                if action != 'propose' and not issue.proposal:
+                if action != 'compromise' and not issue.proposal:
                     continue
 
                 # Log the action
@@ -304,10 +356,23 @@ class World:
                 )
 
                 # Handle different action types
-                if action == 'propose' and proposal:
+                if action == 'compromise' and proposal:
                     issue.proposal = proposal
-                    issue.accepted_by.clear()
-                elif action == 'accept':
+                    issue.accepted_by.add(agent.id)
+                    
+                    # Remove same camp's acceptance
+                    same_camp_agents = [a.id for a in self.agents if a.camp == agent.camp]
+                    issue.accepted_by.difference_update(same_camp_agents)
+
+                if action == 'demand' and proposal:
+                    issue.proposal = proposal
+                    issue.accepted_by.add(agent.id)
+
+                    # Remove opposite camp's acceptance
+                    opposite_agents = [a.id for a in self.agents if a.camp != agent.camp]
+                    issue.accepted_by.difference_update(opposite_agents)
+
+                if action == 'accept':
                     issue.accepted_by.add(agent.id)
                     # Check if all agents have accepted
                     if len(issue.accepted_by) == len(self.agents):
@@ -317,10 +382,6 @@ class World:
                         for a in self.agents:
                             share = issue.proposal[0] if a.camp == 'A' else issue.proposal[1]
                             a.total_surplus += a.issue_weights[issue.name] * share
-                elif action == 'reject':
-                    if agent.id in issue.accepted_by:
-                        # If agent rejects, remove from accepted set
-                        issue.accepted_by.remove(agent.id)
 
     def _process_battles(self, step: int) -> None:
         for bf in self.battles:
@@ -346,6 +407,8 @@ class World:
                     'battlefield': bf.name,
                     'winner': winner
                 })
+            
+            bf.intensity = total / self.max_resources  # Normalize intensity
     
     def resolved_ratio(self) -> float:
         """Calculate the ratio of resolved issues to total issues."""
@@ -358,7 +421,7 @@ class World:
         (total military allocations) / (total available resources)
         """
         self._log_conflict_intensity(step_num)
-        self.conflict_intensity = self.total_allocations / self.total_resources
+        self.conflict_intensity = self.total_allocations / (self.total_resources * len(self.battles))
         self.total_allocations = 0.0  # Reset for next step
         
     def _update_negotiation_tension(self) -> None:
@@ -367,6 +430,15 @@ class World:
         Tension increases with unresolved issues, simulating negotiation pressure.
         """
         self.negotiation_tension += self.negotiation_tension_factor * (1 - self.resolved_ratio())
+        
+    def _update_fatigue(self) -> None:
+        """Update agent fatigue based on negotiation and battle actions.
+        
+        Fatigue increases with each step, simulating resource depletion.
+        """
+        self.fatigue += self.fatigue_change_factor
+        # Cap fatigue to a maximum value
+        self.fatigue = min(self.fatigue, 1.0)
 
     def step(self, step_num: int) -> None:
         """Execute one complete simulation step.
@@ -380,6 +452,7 @@ class World:
         self._process_battles(step_num)
         self._update_conflict_intensity(step_num)
         self._update_negotiation_tension()
+        self._update_fatigue()
         self.last_step_actions = self.current_step_actions
         self.current_step_actions = self._new_last_step_actions()
 
