@@ -76,7 +76,7 @@ def handle_start(data):
 
             socketio.emit('step_update', payload)
 
-            if world.resolved_ratio() >= world.resolved_threshold:
+            if world.resolved_ratio() >= 1.0 or step >= world.max_steps - 1:
                 break
         
         socketio.emit('simulation_complete', {'total_steps': step + 1})

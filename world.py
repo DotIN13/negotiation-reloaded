@@ -61,7 +61,7 @@ class AgentParameters:
         }
 
         issue_bottomlines = {
-            iss: float(rng.random() * 50.0) for iss in issue_names
+            iss: float(rng.random() * 100.0) for iss in issue_names
         }
 
         return AgentParameters(
@@ -135,8 +135,8 @@ class World:
         surplus_factor: float = 0.3,
         external_pressure_factor: float = 0.3,
         proposal_std: float = 5.0,  # Standard deviation for proposal generation
-        resolved_threshold: float = 0.75, # Threshold for early termination
-        max_steps: int = 50,
+        resolved_threshold: float = 0.9, # Threshold for issue resolution (75% acceptance)
+        max_steps: int = 200,
         seed: Optional[int] = None,
     ):
         self.seed = seed
@@ -400,7 +400,7 @@ class World:
                 if action == 'accept':
                     issue.accepted_by.add(agent.id)
                     # Check if all agents have accepted
-                    if len(issue.accepted_by) == len(self.agents):
+                    if len(issue.accepted_by) / len(self.agents) >= self.resolved_threshold:
                         issue.settled = True
                         self._log_resolved_issue(step, issue.name, issue.proposal)
                         # Update agent surpluses
@@ -492,12 +492,12 @@ class World:
         """
         for step in range(self.max_steps):
             self.step(step)
-            if self.resolved_ratio() >= self.resolved_threshold:
+            if self.resolved_ratio() == 1.0:
                 break  # Early termination if all issues resolved
 
         # Save logs to file
-        with open('logs/simulation_results.json', 'w', encoding='utf-8') as f:
-            json.dump(self.logs, f, indent=2)
+        # with open('logs/simulation_results.json', 'w', encoding='utf-8') as f:
+        #     json.dump(self.logs, f, indent=2)
 
         return self.logs
 

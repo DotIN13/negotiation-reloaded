@@ -99,13 +99,8 @@ class Agent:
         beta = self.battle_betas[battlefield.name]              # shape (2, 4)
         utilities = beta.dot(features)                         # shape (2,)
 
-        # 2) Offsets from allies
-        offsets = world.build_external_pressure_offsets(
-            self.camp, "battlefield", battlefield.name, self.ACTIONS_BATTLE
-        ) * world.external_pressure_factor
-
         # 3) Softmax + offsets → probabilities
-        probs = self._softmax(utilities) + offsets
+        probs = self._softmax(utilities)
         probs = np.clip(probs, 0, None)
         probs /= probs.sum()
 
@@ -124,7 +119,7 @@ class Agent:
 
         share = issue.proposal[0] if self.camp == 'A' else issue.proposal[1]
         raw = max(0.0, share - bottom)
-        return raw / (100.0 - bottom)
+        return raw / (100.0 - bottom) if bottom < 100.0 else 1.0
 
     def _issue_feature_vector(self, issue, world: 'World') -> np.ndarray:
         """Construct feature vector for issue utilities."""
@@ -149,10 +144,10 @@ class Agent:
         sf, ff = world.surplus_factor, world.fatigue_factor
         # compromise/demand get negative boost when surplus high; accept gets positive
         return np.array([
-            -sf * surplus - sf * total_surplus,              # compromise
-            sf * surplus + sf * total_surplus + ff * world.fatigue,  # accept
-            -sf * surplus - sf * total_surplus,              # demand
-            sf * total_surplus                              # idle
+            (sf * surplus + sf * total_surplus + ff * world.fatigue),  # compromise
+            (sf * surplus + sf * total_surplus + ff * world.fatigue),  # accept
+            (-sf * surplus - sf * total_surplus),                     # demand
+            sf * total_surplus                                        # idle
         ])
 
     def _make_proposal(

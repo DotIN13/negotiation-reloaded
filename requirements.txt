@@ -1,3 +1,5 @@
 numpy>=2.0.0
+deap==1.4.3
 flask-socketio
 eventlet
+scoop==0.7.2.0
