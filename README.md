@@ -36,7 +36,7 @@ This project implements a calibrated agent-based model (ABM) for simulating inte
 
 2. Install dependencies: Ensure you have Python 3.10 or later installed.
    ```bash
-   pip install numpy pyyaml
+   pip install -r requirements.txt
    ```
 
 ## Running the Simulation
@@ -44,30 +44,8 @@ This project implements a calibrated agent-based model (ABM) for simulating inte
 To run the simulation with the Bosnian War configuration:
 
 ```bash
-python world.py configs/bosnian_war.yml
+python app.py
 ```
-
-Simulation results will be saved in `logs/simulation_results.json`.
-
-## Output Format
-
-The output JSON contains logs for:
-
-* `agent_actions`: proposals, acceptances, and demandions on issues.
-* `resource_allocations`: battlefield-specific resource use by agents.
-* `battle_controls`: control shares over contested areas over time.
-* `resolved_issues`: final settled outcomes and shares.
-* `conflict_intensity`: ratio of total resources spent to capacity, per step.
-
-These logs can be used for evaluation, visualization, or further modeling.
-
-## Research Applications
-
-This model supports research in:
-
-* Crisis bargaining and conflict escalation.
-* Learning strategic preferences from historical data.
-* Evaluating the impact of third-party mediators or military interventions.
 
 ## Citation
 
