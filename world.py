@@ -17,6 +17,60 @@ from agent import Agent
 # -------------------------------
 # Data Classes for State Tracking
 # -------------------------------
+    
+@dataclass
+class AgentParameters:
+    """
+    Container for per-agent decision-making parameters.
+    """
+    issue_weights: Dict[str, float]
+    battle_weights: Dict[str, float]
+    issue_betas: Dict[str, np.ndarray]
+    battle_betas: Dict[str, np.ndarray]
+    issue_bottomlines: Dict[str, float]
+
+    @staticmethod
+    def random(
+        issue_names: List[str],
+        battle_names: List[str],
+        seed: Optional[int] = None
+    ) -> 'AgentParameters':
+        """
+        Generate random parameters for an agent.
+
+        Args:
+            issue_names: List of issue identifiers.
+            battle_names: List of battlefield identifiers.
+            seed: Optional random seed for reproducibility.
+
+        Returns:
+            An AgentParameters instance with randomized weights, betas, and bottom-lines.
+        """
+        rng = np.random.default_rng(seed)
+
+        issue_weights = {iss: float(rng.random()) for iss in issue_names}
+        battle_weights = {bf: float(rng.random()) for bf in battle_names}
+
+        issue_betas = {
+            iss: rng.standard_normal((len(Agent.ACTIONS_ISSUE), Agent.NUM_ISSUE_FEATURES))
+            for iss in issue_names
+        }
+        battle_betas = {
+            bf: rng.standard_normal((len(Agent.ACTIONS_BATTLE), Agent.NUM_BATTLE_FEATURES))
+            for bf in battle_names
+        }
+
+        issue_bottomlines = {
+            iss: float(rng.random() * 50.0) for iss in issue_names
+        }
+
+        return AgentParameters(
+            issue_weights=issue_weights,
+            battle_weights=battle_weights,
+            issue_betas=issue_betas,
+            battle_betas=battle_betas,
+            issue_bottomlines=issue_bottomlines
+        )
 
 @dataclass
 class Issue:
@@ -71,6 +125,7 @@ class World:
     def __init__(
         self,
         config_path: str,
+        agent_params: Optional[Dict[str, AgentParameters]] = None,
         initial_conflict_intensity: float = 1.0,
         initial_negotiation_tension: float = 0.3,
         negotiation_tension_factor: float = 0.05,
@@ -82,8 +137,12 @@ class World:
         proposal_std: float = 5.0,  # Standard deviation for proposal generation
         resolved_threshold: float = 0.75, # Threshold for early termination
         max_steps: int = 50,
-        npz_file: Optional[str] = None
+        seed: Optional[int] = None,
     ):
+        self.seed = seed
+        if seed is not None:
+            np.random.seed(seed)
+
         # Load simulation configuration
         with open(config_path, 'r', encoding='utf-8') as f:
             self.config = yaml.safe_load(f)
@@ -110,9 +169,8 @@ class World:
         # Initialize data structures
         self._initialize_logging()
         self._initialize_world_entities()
-        self._load_parameters(npz_file)
         self.camps = defaultdict(int)  # Track number of agents per camp
-        self.agents = self._create_agents()
+        self.agents = self._create_agents(agent_params)
         
         # Calculate initial global metrics
         self.total_resources = sum(agent.resources for agent in self.agents)
@@ -194,69 +252,34 @@ class World:
     # Model Parameter Initialization
     # -------------------------------
 
-    def _load_parameters(self, npz_file: Optional[str]) -> None:
-        """Load or generate model parameters for agents.
-        
-        Parameters can be loaded from NPZ file or generated randomly.
-        Includes:
-        - Issue importance weights
-        - Battlefield importance weights  
-        - Decision model coefficients (betas)
-        - Negotiation bottom lines
+    def _create_agents(self, agent_params) -> List[Agent]:
         """
-        agent_ids = [a['id'] for a in self.config['agents']]
+        Instantiate Agent objects using provided parameters.
+        """
         issue_names = [issue.name for issue in self.issues]
         battle_names = [bf.name for bf in self.battles]
-
-        if npz_file:
-            # Load pre-trained parameters from file
-            data = np.load(npz_file, allow_pickle=True)
-            self.issue_weights = data['weights_issues'].item()
-            self.battle_weights = data['weights_battlefield'].item()
-            self.issue_betas = data['betas_issues'].item()
-            self.battle_betas = data['betas_battlefield'].item()
-            self.issue_bottomlines = data['issue_bottomlines'].item()
-        else:
-            # Generate random parameters if no file provided
-            self.issue_weights = {
-                aid: {iss: np.random.rand() for iss in issue_names}
-                for aid in agent_ids
-            }
-            self.battle_weights = {
-                aid: {bf: np.random.rand() for bf in battle_names}
-                for aid in agent_ids
-            }
-            self.issue_betas = {
-                aid: {iss: np.random.randn(4, Agent.NUM_ISSUE_FEATURES) for iss in issue_names}
-                for aid in agent_ids
-            }
-            self.battle_betas = {
-                aid: {bf: np.random.randn(2, Agent.NUM_BATTLE_FEATURES) for bf in battle_names}
-                for aid in agent_ids
-            }
-            self.issue_bottomlines = {
-                aid: {iss: np.random.rand() * 50 for iss in issue_names}
-                for aid in agent_ids
-            }
-
-
-    def _create_agents(self) -> List[Agent]:
-        """Instantiate Agent objects with their configured parameters."""
+        
         agents: List[Agent] = []
         for agent_cfg in self.config['agents']:
-            agent_id = agent_cfg['id']
+            aid = agent_cfg['id']
+
+            if agent_params and aid in agent_params:
+                params = agent_params[aid]
+            else:
+                params = AgentParameters.random(issue_names, battle_names, self.seed)
+
             agents.append(Agent(
-                agent_id=agent_id,
+                agent_id=aid,
                 camp=agent_cfg['camp'],
                 resources=float(agent_cfg['resources']),
                 combat=agent_cfg['combat'],
-                issue_weights=self.issue_weights[agent_id],
-                battle_weights=self.battle_weights[agent_id],
-                issue_betas=self.issue_betas[agent_id],
-                battle_betas=self.battle_betas[agent_id],
-                issue_bottomlines=self.issue_bottomlines[agent_id]
+                issue_weights=params.issue_weights,
+                battle_weights=params.battle_weights,
+                issue_betas=params.issue_betas,
+                battle_betas=params.battle_betas,
+                issue_bottomlines=params.issue_bottomlines
             ))
-            self.camps[agent_cfg['camp']] += 1  # Count agents per camp
+            self.camps[agent_cfg['camp']] += 1
         return agents
 
     # -------------------------------
@@ -358,11 +381,13 @@ class World:
                 # Handle different action types
                 if action == 'compromise' and proposal:
                     issue.proposal = proposal
-                    issue.accepted_by.add(agent.id)
                     
                     # Remove same camp's acceptance
                     same_camp_agents = [a.id for a in self.agents if a.camp == agent.camp]
                     issue.accepted_by.difference_update(same_camp_agents)
+                    
+                    # Add agent's acceptance
+                    issue.accepted_by.add(agent.id)
 
                 if action == 'demand' and proposal:
                     issue.proposal = proposal
@@ -487,5 +512,5 @@ if __name__ == '__main__':
     npz_file = sys.argv[2] if len(sys.argv) > 2 else None
 
     # Initialize and run simulation
-    world = World(config_file, max_steps=1000, npz_file=npz_file)
+    world = World(config_file, max_steps=1000)
     logs = world.run()

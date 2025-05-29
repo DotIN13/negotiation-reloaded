@@ -44,7 +44,8 @@ def handle_start(data):
         external_pressure_factor=float(data['external_pressure_factor']),
         proposal_std=float(data['proposal_std']),
         resolved_threshold=float(data['resolved_threshold']),
-        max_steps=int(data['max_steps'])
+        max_steps=int(data['max_steps']),
+        seed=int(data['seed'])
     )
     
     def run():
