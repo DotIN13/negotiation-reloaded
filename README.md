@@ -21,7 +21,7 @@ This project implements a calibrated agent-based model (ABM) for simulating inte
 │   └── bosnian_war.yml         # Example conflict scenario configuration
 ├── logs/
 │   └── simulation_results.json # Simulation output
-├── calibrate.py                # (Not implemented yet) parameter fitting using evolutionary search
+├── ga.py                       # parameter fitting using evolutionary search
 ├── README.md
 
 ````
@@ -37,6 +37,16 @@ This project implements a calibrated agent-based model (ABM) for simulating inte
 2. Install dependencies: Ensure you have Python 3.10 or later installed.
    ```bash
    pip install -r requirements.txt
+   ```
+
+   if you are using conda, you can create a new environment:
+   ```bash
+   conda env create -f environment.yml -n negotiation
+   ```
+
+   Then activate the environment:
+   ```bash
+   conda activate negotiation
    ```
 
 ## Running the Simulation
@@ -62,4 +72,4 @@ If using this work in academic research, please cite:
 
 ## Contact
 
-For questions or collaborations, contact Tianyi Zhang at [tianyiz@uchicago.edu](mailto:tzhang3@uchicago.edu) or open an issue on GitHub.
+For questions or collaborations, contact [Tianyi Zhang](mailto:tzhang3@uchicago.edu) at or open an issue on GitHub.
